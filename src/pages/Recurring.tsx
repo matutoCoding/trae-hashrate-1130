@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useCustomerStore } from '@/stores/useCustomerStore';
 import { useBookingStore } from '@/stores/useBookingStore';
 import { Button } from '@/components/common/Button';
@@ -15,11 +15,14 @@ import {
   Clock,
   Users,
   Music,
+  Eye,
+  ChevronRight,
 } from 'lucide-react';
 import {
   getFrequencyLabel,
   getWeekdayNames,
   generateBookingsFromRule,
+  generateRecurringDates,
 } from '@/utils/recurringUtils';
 import { formatDate, formatMoney } from '@/utils/dateUtils';
 import { getMemberLevelColor, getMemberLevelLabel } from '@/utils/priceUtils';
@@ -34,6 +37,7 @@ export default function Recurring() {
   const [editingRule, setEditingRule] = useState<string | null>(null);
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
   
   const [formData, setFormData] = useState({
     customerId: '',
@@ -118,8 +122,47 @@ export default function Recurring() {
   
   const handleGenerate = (ruleId: string) => {
     setSelectedRuleId(ruleId);
+    setShowPreview(false);
     setShowGenerateModal(true);
   };
+  
+  const selectedRule = selectedRuleId
+    ? recurringRules.find((r) => r.id === selectedRuleId)
+    : null;
+  
+  const previewData = useMemo(() => {
+    if (!selectedRule) return { dates: [], totalPrice: 0, roomPricePerHour: 0, packagePrice: 0 };
+    
+    const room = rooms.find((r) => r.id === selectedRule.roomId);
+    const pkg = packages.find((p) => p.id === selectedRule.packageId);
+    
+    const dates = generateRecurringDates(selectedRule);
+    
+    const startHours = parseInt(selectedRule.startTime.split(':')[0]);
+    const startMinutes = parseInt(selectedRule.startTime.split(':')[1]);
+    const endHours = parseInt(selectedRule.endTime.split(':')[0]);
+    const endMinutes = parseInt(selectedRule.endTime.split(':')[1]);
+    
+    let startTotal = startHours * 60 + startMinutes;
+    let endTotal = endHours * 60 + endMinutes;
+    if (endTotal <= startTotal) {
+      endTotal += 24 * 60;
+    }
+    const durationHours = (endTotal - startTotal) / 60;
+    const roomPricePerHour = room?.pricePerHour || 0;
+    const packagePrice = pkg?.price || 0;
+    const singlePrice = Math.round(durationHours * roomPricePerHour + packagePrice);
+    const totalPrice = singlePrice * dates.length;
+    
+    return {
+      dates,
+      totalPrice,
+      roomPricePerHour,
+      packagePrice,
+      singlePrice,
+      durationHours,
+    };
+  }, [selectedRule, rooms, packages]);
   
   const confirmGenerate = () => {
     if (!selectedRuleId) return;
@@ -140,12 +183,10 @@ export default function Recurring() {
     
     setShowGenerateModal(false);
     setSelectedRuleId(null);
+    setShowPreview(false);
   };
   
-  const selectedRule = selectedRuleId
-    ? recurringRules.find((r) => r.id === selectedRuleId)
-    : null;
-  const generatedCount = selectedRule ? selectedRule.occurrences || 12 : 0;
+  const generatedCount = previewData.dates.length;
   
   return (
     <div className="space-y-6">
@@ -452,53 +493,123 @@ export default function Recurring() {
       
       <Modal
         isOpen={showGenerateModal}
-        onClose={() => setShowGenerateModal(false)}
+        onClose={() => {
+          setShowGenerateModal(false);
+          setShowPreview(false);
+        }}
         title="确认生成预订"
-        size="md"
+        size="lg"
       >
         <div className="space-y-4">
-          <p className="text-gray-300">
-            确定要根据此周期规则生成预订吗？
-          </p>
-          
           {selectedRule && (
-            <div className="bg-gray-800/50 rounded-lg p-4 space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-400">客户</span>
-                <span className="text-white">{selectedRule.customerName}</span>
+            <>
+              <div className="bg-gray-800/50 rounded-lg p-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">客户</span>
+                  <span className="text-white">{selectedRule.customerName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">包厢</span>
+                  <span className="text-white">{selectedRule.roomName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">周期</span>
+                  <span className="text-white">
+                    {getFrequencyLabel(selectedRule.frequency)} ·{' '}
+                    {getWeekdayNames(selectedRule.weekdays)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">时段</span>
+                  <span className="text-white">
+                    {selectedRule.startTime} - {selectedRule.endTime}
+                    {previewData.durationHours && (
+                      <span className="text-gray-400 ml-2">
+                        ({previewData.durationHours.toFixed(1)}小时)
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">单价</span>
+                  <span className="text-white">
+                    {formatMoney(previewData.singlePrice || 0)}/次
+                  </span>
+                </div>
+                <div className="border-t border-gray-700 pt-2 mt-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">生成数量</span>
+                    <span className="text-purple-400 font-medium">
+                      {generatedCount} 条预订
+                    </span>
+                  </div>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-gray-400">预计总金额</span>
+                    <span className="text-green-400 font-bold text-lg">
+                      {formatMoney(previewData.totalPrice)}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">包厢</span>
-                <span className="text-white">{selectedRule.roomName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">周期</span>
-                <span className="text-white">
-                  {getFrequencyLabel(selectedRule.frequency)} ·{' '}
-                  {getWeekdayNames(selectedRule.weekdays)}
+              
+              <button
+                type="button"
+                onClick={() => setShowPreview(!showPreview)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-gray-800/50 rounded-lg text-gray-300 hover:bg-gray-700/50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <Eye className="w-4 h-4" />
+                  预览日期列表
                 </span>
+                <ChevronRight className={cn(
+                  'w-4 h-4 transition-transform',
+                  showPreview && 'rotate-90'
+                )} />
+              </button>
+              
+              {showPreview && (
+                <div className="max-h-60 overflow-y-auto bg-gray-800/30 rounded-lg p-3 space-y-2">
+                  {previewData.dates.length > 0 ? (
+                    previewData.dates.map((date, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between px-3 py-2 bg-gray-800/50 rounded text-sm"
+                      >
+                        <span className="text-gray-400">第 {index + 1} 次</span>
+                        <span className="text-white">
+                          {formatDate(date, 'yyyy-MM-dd EEEE')}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-center text-gray-500 py-4">
+                      没有可生成的日期，请检查周期规则配置
+                    </p>
+                  )}
+                </div>
+              )}
+              
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="ghost"
+                  fullWidth
+                  onClick={() => {
+                    setShowGenerateModal(false);
+                    setShowPreview(false);
+                  }}
+                >
+                  取消
+                </Button>
+                <Button
+                  fullWidth
+                  onClick={confirmGenerate}
+                  disabled={previewData.dates.length === 0}
+                >
+                  确认生成 {generatedCount} 条
+                </Button>
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">生成数量</span>
-                <span className="text-purple-400 font-medium">
-                  {generatedCount} 条预订
-                </span>
-              </div>
-            </div>
+            </>
           )}
-          
-          <div className="flex gap-2 pt-2">
-            <Button
-              variant="ghost"
-              fullWidth
-              onClick={() => setShowGenerateModal(false)}
-            >
-              取消
-            </Button>
-            <Button fullWidth onClick={confirmGenerate}>
-              确认生成
-            </Button>
-          </div>
         </div>
       </Modal>
     </div>

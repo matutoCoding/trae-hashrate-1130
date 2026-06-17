@@ -4,6 +4,8 @@ import { mockCustomers } from '../data/customers';
 import { mockRecurringRules } from '../data/recurringRules';
 import { generateId } from '../utils/dateUtils';
 
+const STORAGE_KEY = 'ktv-customer-store';
+
 interface CustomerState {
   customers: Customer[];
   recurringRules: RecurringRule[];
@@ -31,54 +33,106 @@ interface CustomerState {
   toggleRecurringRule: (id: string) => void;
   
   getPriorityConfig: (level: MemberLevel) => PriorityConfig | undefined;
+  
+  saveToStorage: () => void;
+  loadFromStorage: () => void;
 }
 
-export const useCustomerStore = create<CustomerState>((set, get) => ({
+const priorityConfigs: PriorityConfig[] = [
+  {
+    level: 'normal',
+    weight: 1,
+    queuePriority: 1,
+    canSkipQueue: false,
+    skipLimitPerDay: 0,
+    benefits: ['基础服务', '积分累计'],
+  },
+  {
+    level: 'silver',
+    weight: 2,
+    queuePriority: 2,
+    canSkipQueue: false,
+    skipLimitPerDay: 0,
+    benefits: ['生日优惠', '积分1.5倍', '专属客服'],
+  },
+  {
+    level: 'gold',
+    weight: 3,
+    queuePriority: 3,
+    canSkipQueue: true,
+    skipLimitPerDay: 1,
+    benefits: ['优先排队', '积分2倍', '免费小吃', '生日礼包'],
+  },
+  {
+    level: 'platinum',
+    weight: 4,
+    queuePriority: 4,
+    canSkipQueue: true,
+    skipLimitPerDay: 2,
+    benefits: ['VIP插队', '积分2.5倍', '免费酒水套餐', '专属包厢预留', '管家服务'],
+  },
+  {
+    level: 'diamond',
+    weight: 5,
+    queuePriority: 5,
+    canSkipQueue: true,
+    skipLimitPerDay: 5,
+    benefits: ['钻石专属通道', '积分3倍', '顶级酒水套餐', 'VIP包厢优先', '私人管家', '专属派对定制'],
+  },
+];
+
+const loadInitialState = () => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const data = JSON.parse(stored);
+      return {
+        customers: data.customers?.map((c: any) => ({ ...c })) || mockCustomers,
+        recurringRules: data.recurringRules?.map((r: any) => ({
+          ...r,
+          startDate: new Date(r.startDate),
+          endDate: r.endDate ? new Date(r.endDate) : undefined,
+        })) || mockRecurringRules,
+      };
+    }
+  } catch (e) {
+    console.error('Failed to load from storage:', e);
+  }
+  return null;
+};
+
+const initialState = loadInitialState() || {
   customers: mockCustomers,
   recurringRules: mockRecurringRules,
+};
+
+export const useCustomerStore = create<CustomerState>((set, get) => ({
+  ...initialState,
+  priorityConfigs,
   
-  priorityConfigs: [
-    {
-      level: 'normal',
-      weight: 1,
-      queuePriority: 1,
-      canSkipQueue: false,
-      skipLimitPerDay: 0,
-      benefits: ['基础服务', '积分累计'],
-    },
-    {
-      level: 'silver',
-      weight: 2,
-      queuePriority: 2,
-      canSkipQueue: false,
-      skipLimitPerDay: 0,
-      benefits: ['生日优惠', '积分1.5倍', '专属客服'],
-    },
-    {
-      level: 'gold',
-      weight: 3,
-      queuePriority: 3,
-      canSkipQueue: true,
-      skipLimitPerDay: 1,
-      benefits: ['优先排队', '积分2倍', '免费小吃', '生日礼包'],
-    },
-    {
-      level: 'platinum',
-      weight: 4,
-      queuePriority: 4,
-      canSkipQueue: true,
-      skipLimitPerDay: 2,
-      benefits: ['VIP插队', '积分2.5倍', '免费酒水套餐', '专属包厢预留', '管家服务'],
-    },
-    {
-      level: 'diamond',
-      weight: 5,
-      queuePriority: 5,
-      canSkipQueue: true,
-      skipLimitPerDay: 5,
-      benefits: ['钻石专属通道', '积分3倍', '顶级酒水套餐', 'VIP包厢优先', '私人管家', '专属派对定制'],
-    },
-  ],
+  saveToStorage: () => {
+    try {
+      const state = get();
+      const dataToSave = {
+        customers: state.customers,
+        recurringRules: state.recurringRules.map((r) => ({
+          ...r,
+          startDate: r.startDate.toISOString(),
+          endDate: r.endDate?.toISOString(),
+        })),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+    } catch (e) {
+      console.error('Failed to save to storage:', e);
+    }
+  },
+  
+  loadFromStorage: () => {
+    const state = loadInitialState();
+    if (state) {
+      set(state);
+    }
+  },
   
   getCustomerById: (id) => get().customers.find((c) => c.id === id),
   
@@ -105,6 +159,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     set((state) => ({
       customers: [...state.customers, newCustomer],
     }));
+    get().saveToStorage();
   },
   
   updateCustomer: (id, updates) => {
@@ -113,12 +168,14 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         c.id === id ? { ...c, ...updates } : c
       ),
     }));
+    get().saveToStorage();
   },
   
   deleteCustomer: (id) => {
     set((state) => ({
       customers: state.customers.filter((c) => c.id !== id),
     }));
+    get().saveToStorage();
   },
   
   upgradeMemberLevel: (id, newLevel) => {
@@ -129,6 +186,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
           : c
       ),
     }));
+    get().saveToStorage();
   },
   
   addPoints: (id, points) => {
@@ -137,6 +195,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         c.id === id ? { ...c, points: c.points + points } : c
       ),
     }));
+    get().saveToStorage();
   },
   
   getRecurringRules: () => get().recurringRules,
@@ -155,6 +214,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
     set((state) => ({
       recurringRules: [...state.recurringRules, newRule],
     }));
+    get().saveToStorage();
   },
   
   updateRecurringRule: (id, updates) => {
@@ -163,12 +223,14 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         r.id === id ? { ...r, ...updates } : r
       ),
     }));
+    get().saveToStorage();
   },
   
   deleteRecurringRule: (id) => {
     set((state) => ({
       recurringRules: state.recurringRules.filter((r) => r.id !== id),
     }));
+    get().saveToStorage();
   },
   
   toggleRecurringRule: (id) => {
@@ -177,6 +239,7 @@ export const useCustomerStore = create<CustomerState>((set, get) => ({
         r.id === id ? { ...r, isActive: !r.isActive } : r
       ),
     }));
+    get().saveToStorage();
   },
   
   getPriorityConfig: (level) =>

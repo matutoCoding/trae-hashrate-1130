@@ -9,6 +9,8 @@ import {
   estimateWaitTime,
 } from '../utils/queueUtils';
 
+const STORAGE_KEY = 'ktv-queue-store';
+
 interface QueueState {
   queue: QueueItem[];
   currentCallNumber: number;
@@ -50,13 +52,80 @@ interface QueueState {
   
   clearCompleted: () => void;
   resetQueue: () => void;
+  
+  saveToStorage: () => void;
+  loadFromStorage: () => void;
 }
 
-export const useQueueStore = create<QueueState>((set, get) => ({
+const loadInitialState = () => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const data = JSON.parse(stored);
+      return {
+        queue: data.queue?.map((q: any) => ({
+          ...q,
+          joinTime: new Date(q.joinTime),
+          calledTime: q.calledTime ? new Date(q.calledTime) : undefined,
+          seatedTime: q.seatedTime ? new Date(q.seatedTime) : undefined,
+        })) || mockQueue,
+        currentCallNumber: data.currentCallNumber ?? 100,
+        queueCounter: data.queueCounter ?? 108,
+        history: data.history?.map((h: any) => ({
+          ...h,
+          joinTime: new Date(h.joinTime),
+          calledTime: h.calledTime ? new Date(h.calledTime) : undefined,
+          seatedTime: h.seatedTime ? new Date(h.seatedTime) : undefined,
+        })) || [],
+      };
+    }
+  } catch (e) {
+    console.error('Failed to load from storage:', e);
+  }
+  return null;
+};
+
+const initialState = loadInitialState() || {
   queue: sortQueueByPriority(mockQueue),
   currentCallNumber: 100,
   queueCounter: 108,
   history: [],
+};
+
+export const useQueueStore = create<QueueState>((set, get) => ({
+  ...initialState,
+  
+  saveToStorage: () => {
+    try {
+      const state = get();
+      const dataToSave = {
+        queue: state.queue.map((q) => ({
+          ...q,
+          joinTime: q.joinTime.toISOString(),
+          calledTime: q.calledTime?.toISOString(),
+          seatedTime: q.seatedTime?.toISOString(),
+        })),
+        currentCallNumber: state.currentCallNumber,
+        queueCounter: state.queueCounter,
+        history: state.history.map((h) => ({
+          ...h,
+          joinTime: h.joinTime.toISOString(),
+          calledTime: h.calledTime?.toISOString(),
+          seatedTime: h.seatedTime?.toISOString(),
+        })),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+    } catch (e) {
+      console.error('Failed to save to storage:', e);
+    }
+  },
+  
+  loadFromStorage: () => {
+    const state = loadInitialState();
+    if (state) {
+      set(state);
+    }
+  },
   
   getWaitingQueue: () => {
     return sortQueueByPriority(get().queue.filter((q) => q.status === 'waiting'));
@@ -111,6 +180,8 @@ export const useQueueStore = create<QueueState>((set, get) => ({
         queueCounter: state.queueCounter + 1,
       };
     });
+    
+    get().saveToStorage();
   },
   
   callNext: () => {
@@ -139,9 +210,12 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     }));
     
     get().recalculateEstimatedWait();
+    get().saveToStorage();
   },
   
   seatCustomer: (id) => {
+    const item = get().getQueueItemById(id);
+    
     set((state) => ({
       queue: state.queue.map((q) =>
         q.id === id
@@ -154,22 +228,24 @@ export const useQueueStore = create<QueueState>((set, get) => ({
       ),
     }));
     
-    const item = get().getQueueItemById(id);
     if (item) {
       set((state) => ({
         history: [...state.history, item],
       }));
     }
+    
+    get().saveToStorage();
   },
   
   cancelQueueItem: (id) => {
+    const item = get().getQueueItemById(id);
+    
     set((state) => ({
       queue: state.queue.map((q) =>
         q.id === id ? { ...q, status: 'cancelled' as const } : q
       ),
     }));
     
-    const item = get().getQueueItemById(id);
     if (item) {
       set((state) => ({
         history: [...state.history, { ...item, status: 'cancelled' as const }],
@@ -177,16 +253,18 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     }
     
     get().recalculateEstimatedWait();
+    get().saveToStorage();
   },
   
   noShow: (id) => {
+    const item = get().getQueueItemById(id);
+    
     set((state) => ({
       queue: state.queue.map((q) =>
         q.id === id ? { ...q, status: 'no_show' as const } : q
       ),
     }));
     
-    const item = get().getQueueItemById(id);
     if (item) {
       set((state) => ({
         history: [...state.history, { ...item, status: 'no_show' as const }],
@@ -194,6 +272,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     }
     
     get().recalculateEstimatedWait();
+    get().saveToStorage();
   },
   
   vipCutInLine: (params) => {
@@ -238,6 +317,8 @@ export const useQueueStore = create<QueueState>((set, get) => ({
       };
     });
     
+    get().saveToStorage();
+    
     const queue = get().queue.filter((q) => q.status === 'waiting');
     return queue.findIndex((q) => q.id === newItem.id);
   },
@@ -262,6 +343,8 @@ export const useQueueStore = create<QueueState>((set, get) => ({
         queue: [...otherQueue.filter((q) => q.id !== id), ...updatedWaiting],
       };
     });
+    
+    get().saveToStorage();
   },
   
   recalculateEstimatedWait: () => {
@@ -290,6 +373,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     set((state) => ({
       queue: state.queue.filter((q) => q.status === 'waiting' || q.status === 'called'),
     }));
+    get().saveToStorage();
   },
   
   resetQueue: () => {
@@ -299,5 +383,6 @@ export const useQueueStore = create<QueueState>((set, get) => ({
       queueCounter: 0,
       history: [],
     });
+    get().saveToStorage();
   },
 }));

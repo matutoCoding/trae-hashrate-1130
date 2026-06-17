@@ -19,10 +19,13 @@ import { cn } from '@/lib/utils';
 import { RoomType } from '@/types';
 
 export default function Rooms() {
-  const { rooms, addRoom, updateRoom, deleteRoom } = useBookingStore();
+  const { rooms, bookings, addRoom, updateRoom, deleteRoom, getBookingsByRoom } = useBookingStore();
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRoom, setEditingRoom] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [roomToDelete, setRoomToDelete] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -89,6 +92,38 @@ export default function Rooms() {
       addRoom(formData);
     }
     setIsModalOpen(false);
+  };
+  
+  const handleDeleteClick = (roomId: string) => {
+    const roomBookings = getBookingsByRoom(roomId);
+    const activeBookings = roomBookings.filter(b => b.status !== 'cancelled' && b.status !== 'completed');
+    
+    if (activeBookings.length > 0) {
+      const room = rooms.find(r => r.id === roomId);
+      setDeleteError(
+        `无法删除「${room?.name}」，该包厢还有 ${activeBookings.length} 条关联预订未完成。` +
+        `请先处理或取消相关预订后再删除。`
+      );
+      setDeleteConfirmOpen(true);
+      setRoomToDelete(null);
+    } else {
+      setRoomToDelete(roomId);
+      setDeleteError(null);
+      setDeleteConfirmOpen(true);
+    }
+  };
+  
+  const confirmDelete = () => {
+    if (roomToDelete) {
+      const success = deleteRoom(roomToDelete);
+      if (success) {
+        setDeleteConfirmOpen(false);
+        setRoomToDelete(null);
+      } else {
+        const room = rooms.find(r => r.id === roomToDelete);
+        setDeleteError(`删除「${room?.name}」失败，仍有关联预订记录。`);
+      }
+    }
   };
   
   const toggleEquipment = (equip: string) => {
@@ -238,7 +273,7 @@ export default function Rooms() {
                     size="sm"
                     variant="ghost"
                     fullWidth
-                    onClick={() => deleteRoom(room.id)}
+                    onClick={() => handleDeleteClick(room.id)}
                   >
                     <Trash2 className="w-4 h-4 text-red-400" />
                   </Button>
@@ -392,6 +427,72 @@ export default function Rooms() {
               {editingRoom ? '保存修改' : '添加包厢'}
             </Button>
           </div>
+        </div>
+      </Modal>
+      
+      <Modal
+        isOpen={deleteConfirmOpen}
+        onClose={() => {
+          setDeleteConfirmOpen(false);
+          setRoomToDelete(null);
+          setDeleteError(null);
+        }}
+        title={deleteError ? '无法删除' : '确认删除'}
+        size="md"
+      >
+        <div className="space-y-4">
+          {deleteError ? (
+            <>
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <Settings className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-amber-400 font-medium">删除受限</p>
+                    <p className="text-amber-200/80 text-sm mt-1">{deleteError}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button
+                  fullWidth
+                  onClick={() => {
+                    setDeleteConfirmOpen(false);
+                    setDeleteError(null);
+                  }}
+                >
+                  我知道了
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-gray-300">
+                确定要删除「{rooms.find(r => r.id === roomToDelete)?.name}」吗？
+              </p>
+              <p className="text-gray-500 text-sm">
+                此操作不可撤销，包厢的所有配置信息将被永久删除。
+              </p>
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="ghost"
+                  fullWidth
+                  onClick={() => {
+                    setDeleteConfirmOpen(false);
+                    setRoomToDelete(null);
+                  }}
+                >
+                  取消
+                </Button>
+                <Button
+                  variant="danger"
+                  fullWidth
+                  onClick={confirmDelete}
+                >
+                  确认删除
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
     </div>

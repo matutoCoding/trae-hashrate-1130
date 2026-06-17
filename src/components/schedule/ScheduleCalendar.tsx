@@ -28,7 +28,7 @@ const HOURS_END = 24;
 const HOURS = Array.from({ length: HOURS_END - HOURS_START }, (_, i) => HOURS_START + i);
 
 export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalendarProps) {
-  const { rooms, bookings, selectedDate, viewMode, setSelectedDate, setIsBookingModalOpen, setSelectedBooking } = useBookingStore();
+  const { rooms, bookings, selectedDate, viewMode, setSelectedDate, setIsBookingModalOpen, setSelectedBooking, getBookingsByRoomAndDate } = useBookingStore();
   
   const days = useMemo(() => {
     if (viewMode === 'day') {
@@ -49,9 +49,7 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
   const activeRooms = rooms.filter((r) => r.status === 'active');
   
   const getBookingsForRoomAndDay = (roomId: string, day: Date) => {
-    return bookings.filter(
-      (b) => b.roomId === roomId && isSameDay(new Date(b.startTime), day)
-    );
+    return getBookingsByRoomAndDate(roomId, day);
   };
   
   const navigatePrev = () => {
@@ -70,14 +68,18 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
     }
   };
   
-  const getBookingStyle = (startTime: Date, endTime: Date) => {
-    const startMinutes = setMinutes(setHours(startOfDay(startTime), startTime.getHours()), startTime.getMinutes());
-    const dayStart = setMinutes(setHours(startOfDay(startTime), HOURS_START), 0);
-    const top = (differenceInMinutes(startMinutes, dayStart) / 60) * 60;
-    const height = (differenceInMinutes(endTime, startTime) / 60) * 60;
+  const getBookingStyle = (startTime: Date, endTime: Date, day: Date) => {
+    const dayStart = setMinutes(setHours(startOfDay(day), HOURS_START), 0);
+    const dayEnd = setMinutes(setHours(startOfDay(addDays(day, 1)), HOURS_START), 0);
+    
+    const effectiveStart = startTime > dayStart ? startTime : dayStart;
+    const effectiveEnd = endTime < dayEnd ? endTime : dayEnd;
+    
+    const top = (differenceInMinutes(effectiveStart, dayStart) / 60) * 60;
+    const height = (differenceInMinutes(effectiveEnd, effectiveStart) / 60) * 60;
     
     return {
-      top: `${top}px`,
+      top: `${Math.max(top, 0)}px`,
       height: `${Math.max(height, 30)}px`,
     };
   };
@@ -86,7 +88,15 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
     const time = setMinutes(setHours(day, hour), 0);
     if (onAddBooking) {
       onAddBooking(roomId, time);
+    } else {
+      setSelectedBooking(null);
+      setIsBookingModalOpen(true, day);
     }
+  };
+  
+  const handleAddBooking = () => {
+    setSelectedBooking(null);
+    setIsBookingModalOpen(true, selectedDate);
   };
   
   return (
@@ -119,7 +129,7 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
               {mode === 'day' ? '日' : mode === 'week' ? '周' : '月'}
             </Button>
           ))}
-          <Button onClick={() => setIsBookingModalOpen(true)}>
+          <Button onClick={handleAddBooking}>
             <Plus className="w-4 h-4" />
             新增预订
           </Button>
@@ -167,7 +177,8 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
                     {getBookingsForRoomAndDay(room.id, selectedDate).map((booking) => {
                       const style = getBookingStyle(
                         new Date(booking.startTime),
-                        new Date(booking.endTime)
+                        new Date(booking.endTime),
+                        selectedDate
                       );
                       return (
                         <div
@@ -177,7 +188,7 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedBooking(booking);
-                            setIsBookingModalOpen(true);
+                            setIsBookingModalOpen(true, new Date(booking.startTime));
                           }}
                         >
                           <BookingCard bookingId={booking.id} />

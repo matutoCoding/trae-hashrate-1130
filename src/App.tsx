@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
 import Schedule from '@/pages/Schedule';
@@ -7,8 +8,21 @@ import Vip from '@/pages/Vip';
 import Rooms from '@/pages/Rooms';
 import Packages from '@/pages/Packages';
 import Stats from '@/pages/Stats';
+import { useBookingStore } from '@/stores/useBookingStore';
+import { useCustomerStore } from '@/stores/useCustomerStore';
+import { useQueueStore } from '@/stores/useQueueStore';
 
 export default function App() {
+  const loadBookingStorage = useBookingStore((state) => state.loadFromStorage);
+  const loadCustomerStorage = useCustomerStore((state) => state.loadFromStorage);
+  const loadQueueStorage = useQueueStore((state) => state.loadFromStorage);
+  
+  useEffect(() => {
+    loadBookingStorage();
+    loadCustomerStorage();
+    loadQueueStorage();
+  }, []);
+  
   return (
     <Router>
       <Routes>

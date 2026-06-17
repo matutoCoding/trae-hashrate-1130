@@ -17,7 +17,7 @@ interface BookingFormProps {
 }
 
 export function BookingForm({ isOpen, onClose, booking, defaultRoomId, defaultStartTime }: BookingFormProps) {
-  const { rooms, addBooking, updateBooking, cancelBooking, selectedBooking } = useBookingStore();
+  const { rooms, addBooking, updateBooking, cancelBooking, selectedBooking, modalBaseDate } = useBookingStore();
   const { customers } = useCustomerStore();
   
   const currentBooking = booking || selectedBooking;
@@ -49,10 +49,11 @@ export function BookingForm({ isOpen, onClose, booking, defaultRoomId, defaultSt
           isRecurring: currentBooking.isRecurring,
         });
       } else {
-        const start = defaultStartTime || new Date();
+        const baseDate = modalBaseDate || new Date();
+        const start = defaultStartTime || baseDate;
         const end = defaultStartTime
           ? new Date(defaultStartTime.getTime() + 3 * 60 * 60 * 1000)
-          : new Date(Date.now() + 3 * 60 * 60 * 1000);
+          : new Date(baseDate.getTime() + 3 * 60 * 60 * 1000);
         
         setFormData({
           roomId: defaultRoomId || rooms[0]?.id || '',
@@ -74,20 +75,43 @@ export function BookingForm({ isOpen, onClose, booking, defaultRoomId, defaultSt
     state.packages.find((p) => p.id === formData.packageId)
   );
   
-  const calculatePrice = () => {
-    if (!selectedRoom) return 0;
+  const calculateHours = () => {
     const [startH, startM] = formData.startTime.split(':').map(Number);
     const [endH, endM] = formData.endTime.split(':').map(Number);
-    const hours = (endH - startH) + (endM - startM) / 60;
+    
+    let startMinutes = startH * 60 + startM;
+    let endMinutes = endH * 60 + endM;
+    
+    if (endMinutes <= startMinutes) {
+      endMinutes += 24 * 60;
+    }
+    
+    return (endMinutes - startMinutes) / 60;
+  };
+  
+  const calculatePrice = () => {
+    if (!selectedRoom) return 0;
+    const hours = calculateHours();
     const roomPrice = hours * selectedRoom.pricePerHour;
     const pkgPrice = selectedPackage?.price || 0;
     return Math.round(roomPrice + pkgPrice);
   };
   
+  const isOvernight = () => {
+    const [startH, startM] = formData.startTime.split(':').map(Number);
+    const [endH, endM] = formData.endTime.split(':').map(Number);
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+    return endMinutes <= startMinutes;
+  };
+  
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    const baseDate = new Date();
+    const baseDate = currentBooking 
+      ? new Date(currentBooking.startTime)
+      : (modalBaseDate || new Date());
+    
     const [startH, startM] = formData.startTime.split(':').map(Number);
     const [endH, endM] = formData.endTime.split(':').map(Number);
     
@@ -96,6 +120,10 @@ export function BookingForm({ isOpen, onClose, booking, defaultRoomId, defaultSt
     
     const endDate = new Date(baseDate);
     endDate.setHours(endH, endM, 0, 0);
+    
+    if (isOvernight()) {
+      endDate.setDate(endDate.getDate() + 1);
+    }
     
     if (currentBooking) {
       updateBooking(currentBooking.id, {
@@ -267,8 +295,11 @@ export function BookingForm({ isOpen, onClose, booking, defaultRoomId, defaultSt
           {selectedRoom && (
             <div className="text-right text-sm text-gray-400">
               <p>{selectedRoom.name}</p>
-              <p>¥{selectedRoom.pricePerHour}/小时</p>
-              {selectedPackage && <p>+ {selectedPackage.name}</p>}
+              <p>¥{selectedRoom.pricePerHour}/小时 × {calculateHours().toFixed(1)}小时</p>
+              {selectedPackage && <p>+ {selectedPackage.name} ¥{selectedPackage.price}</p>}
+              {isOvernight() && (
+                <p className="text-amber-400 mt-1">跨夜时段 (+1天)</p>
+              )}
             </div>
           )}
         </div>

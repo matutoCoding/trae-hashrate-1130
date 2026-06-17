@@ -70,7 +70,13 @@ export default function Schedule() {
       </div>
       
       <ScheduleCalendar
-        onAddBooking={() => setIsBookingModalOpen(true)}
+        onAddBooking={(roomId, time) => {
+          if (time) {
+            setIsBookingModalOpen(true, time);
+          } else {
+            setIsBookingModalOpen(true);
+          }
+        }}
       />
       
       <BookingForm

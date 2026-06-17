@@ -6,6 +6,8 @@ import { mockPackages } from '../data/packages';
 import { generateId } from '../utils/dateUtils';
 import { calculateBookingPrice, calculateExtraPrice } from '../utils/priceUtils';
 
+const STORAGE_KEY = 'ktv-booking-store';
+
 interface BookingState {
   rooms: Room[];
   bookings: Booking[];
@@ -15,17 +17,20 @@ interface BookingState {
   selectedBooking: Booking | null;
   isBookingModalOpen: boolean;
   isExtendModalOpen: boolean;
+  modalBaseDate: Date;
   
   setSelectedDate: (date: Date) => void;
   setViewMode: (mode: ViewMode) => void;
   setSelectedBooking: (booking: Booking | null) => void;
-  setIsBookingModalOpen: (open: boolean) => void;
+  setIsBookingModalOpen: (open: boolean, baseDate?: Date) => void;
   setIsExtendModalOpen: (open: boolean) => void;
   
   getRoomById: (id: string) => Room | undefined;
   getPackageById: (id: string) => Package | undefined;
   getBookingsByRoom: (roomId: string) => Booking[];
   getBookingsByDate: (date: Date) => Booking[];
+  getBookingsByRoomAndDate: (roomId: string, date: Date) => Booking[];
+  hasBookingsForRoom: (roomId: string) => boolean;
   
   addBooking: (booking: Omit<Booking, 'id' | 'totalPrice' | 'extraHours' | 'extraPrice'> & { packageId?: string }) => void;
   updateBooking: (id: string, updates: Partial<Booking>) => void;
@@ -36,27 +41,73 @@ interface BookingState {
   
   addRoom: (room: Omit<Room, 'id'>) => void;
   updateRoom: (id: string, updates: Partial<Room>) => void;
-  deleteRoom: (id: string) => void;
+  deleteRoom: (id: string) => boolean;
   
   addPackage: (pkg: Omit<Package, 'id'>) => void;
   updatePackage: (id: string, updates: Partial<Package>) => void;
   deletePackage: (id: string) => void;
+  
+  loadFromStorage: () => void;
+  saveToStorage: () => void;
 }
 
-export const useBookingStore = create<BookingState>((set, get) => ({
+const loadInitialState = () => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const data = JSON.parse(stored);
+      return {
+        rooms: data.rooms?.map((r: any) => ({ ...r })) || mockRooms,
+        bookings: data.bookings?.map((b: any) => ({
+          ...b,
+          startTime: new Date(b.startTime),
+          endTime: new Date(b.endTime),
+        })) || mockBookings,
+        packages: data.packages?.map((p: any) => ({ ...p })) || mockPackages,
+        selectedDate: data.selectedDate ? new Date(data.selectedDate) : new Date(),
+        viewMode: data.viewMode || 'day' as ViewMode,
+      };
+    }
+  } catch (e) {
+    console.error('Failed to load from storage:', e);
+  }
+  return null;
+};
+
+const initialState = loadInitialState() || {
   rooms: mockRooms,
   bookings: mockBookings,
   packages: mockPackages,
   selectedDate: new Date(),
-  viewMode: 'day',
+  viewMode: 'day' as ViewMode,
+};
+
+export const useBookingStore = create<BookingState>((set, get) => ({
+  ...initialState,
   selectedBooking: null,
   isBookingModalOpen: false,
   isExtendModalOpen: false,
+  modalBaseDate: new Date(),
   
-  setSelectedDate: (date) => set({ selectedDate: date }),
-  setViewMode: (mode) => set({ viewMode: mode }),
+  setSelectedDate: (date) => {
+    set({ selectedDate: date });
+    get().saveToStorage();
+  },
+  
+  setViewMode: (mode) => {
+    set({ viewMode: mode });
+    get().saveToStorage();
+  },
+  
   setSelectedBooking: (booking) => set({ selectedBooking: booking }),
-  setIsBookingModalOpen: (open) => set({ isBookingModalOpen: open }),
+  
+  setIsBookingModalOpen: (open, baseDate) => {
+    set({
+      isBookingModalOpen: open,
+      modalBaseDate: baseDate || get().selectedDate,
+    });
+  },
+  
   setIsExtendModalOpen: (open) => set({ isExtendModalOpen: open }),
   
   getRoomById: (id) => get().rooms.find((r) => r.id === id),
@@ -74,6 +125,25 @@ export const useBookingStore = create<BookingState>((set, get) => ({
         bookingDate.getDate() === date.getDate()
       );
     }),
+  
+  getBookingsByRoomAndDate: (roomId, date) =>
+    get().bookings.filter((b) => {
+      const startDate = new Date(b.startTime);
+      const endDate = new Date(b.endTime);
+      const dayStart = new Date(date);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(date);
+      dayEnd.setHours(23, 59, 59, 999);
+      
+      return (
+        b.roomId === roomId &&
+        startDate <= dayEnd &&
+        endDate >= dayStart
+      );
+    }),
+  
+  hasBookingsForRoom: (roomId) =>
+    get().bookings.some((b) => b.roomId === roomId),
   
   addBooking: (bookingData) => {
     const room = get().getRoomById(bookingData.roomId);
@@ -102,6 +172,8 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     set((state) => ({
       bookings: [...state.bookings, newBooking],
     }));
+    
+    get().saveToStorage();
   },
   
   updateBooking: (id, updates) => {
@@ -110,6 +182,7 @@ export const useBookingStore = create<BookingState>((set, get) => ({
         b.id === id ? { ...b, ...updates } : b
       ),
     }));
+    get().saveToStorage();
   },
   
   cancelBooking: (id) => {
@@ -118,6 +191,7 @@ export const useBookingStore = create<BookingState>((set, get) => ({
         b.id === id ? { ...b, status: 'cancelled' as const } : b
       ),
     }));
+    get().saveToStorage();
   },
   
   extendBooking: (id, hours) => {
@@ -143,12 +217,14 @@ export const useBookingStore = create<BookingState>((set, get) => ({
           : b
       ),
     }));
+    get().saveToStorage();
   },
   
   addBookings: (newBookings) => {
     set((state) => ({
       bookings: [...state.bookings, ...newBookings],
     }));
+    get().saveToStorage();
   },
   
   addRoom: (roomData) => {
@@ -159,6 +235,7 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     set((state) => ({
       rooms: [...state.rooms, newRoom],
     }));
+    get().saveToStorage();
   },
   
   updateRoom: (id, updates) => {
@@ -167,12 +244,18 @@ export const useBookingStore = create<BookingState>((set, get) => ({
         r.id === id ? { ...r, ...updates } : r
       ),
     }));
+    get().saveToStorage();
   },
   
   deleteRoom: (id) => {
+    if (get().hasBookingsForRoom(id)) {
+      return false;
+    }
     set((state) => ({
       rooms: state.rooms.filter((r) => r.id !== id),
     }));
+    get().saveToStorage();
+    return true;
   },
   
   addPackage: (pkgData) => {
@@ -183,6 +266,7 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     set((state) => ({
       packages: [...state.packages, newPkg],
     }));
+    get().saveToStorage();
   },
   
   updatePackage: (id, updates) => {
@@ -191,11 +275,40 @@ export const useBookingStore = create<BookingState>((set, get) => ({
         p.id === id ? { ...p, ...updates } : p
       ),
     }));
+    get().saveToStorage();
   },
   
   deletePackage: (id) => {
     set((state) => ({
       packages: state.packages.filter((p) => p.id !== id),
     }));
+    get().saveToStorage();
+  },
+  
+  loadFromStorage: () => {
+    const state = loadInitialState();
+    if (state) {
+      set(state);
+    }
+  },
+  
+  saveToStorage: () => {
+    try {
+      const state = get();
+      const dataToSave = {
+        rooms: state.rooms,
+        bookings: state.bookings.map((b) => ({
+          ...b,
+          startTime: b.startTime.toISOString(),
+          endTime: b.endTime.toISOString(),
+        })),
+        packages: state.packages,
+        selectedDate: state.selectedDate.toISOString(),
+        viewMode: state.viewMode,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+    } catch (e) {
+      console.error('Failed to save to storage:', e);
+    }
   },
 }));
