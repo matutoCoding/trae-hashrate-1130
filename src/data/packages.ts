@@ -1,0 +1,86 @@
+import { Package } from '../types';
+
+export const mockPackages: Package[] = [
+  {
+    id: 'pkg-1',
+    name: '啤酒畅饮套餐',
+    description: '适合4-6人小聚，啤酒无限畅饮',
+    price: 298,
+    originalPrice: 398,
+    category: 'beer',
+    items: [
+      { name: '青岛啤酒', quantity: 12, unit: '瓶' },
+      { name: '花生米', quantity: 2, unit: '份' },
+      { name: '瓜子', quantity: 2, unit: '份' },
+    ],
+  },
+  {
+    id: 'pkg-2',
+    name: '红酒浪漫套餐',
+    description: '精选进口红酒，搭配精致小食',
+    price: 588,
+    originalPrice: 788,
+    category: 'wine',
+    items: [
+      { name: '进口红酒', quantity: 2, unit: '瓶' },
+      { name: '芝士拼盘', quantity: 1, unit: '份' },
+      { name: '水果拼盘', quantity: 1, unit: '份' },
+    ],
+  },
+  {
+    id: 'pkg-3',
+    name: '洋酒尊享套餐',
+    description: '高端洋酒，适合商务宴请',
+    price: 1288,
+    originalPrice: 1688,
+    category: 'spirit',
+    items: [
+      { name: '威士忌', quantity: 1, unit: '瓶' },
+      { name: '绿茶', quantity: 6, unit: '瓶' },
+      { name: '豪华果盘', quantity: 1, unit: '份' },
+      { name: '精致小吃', quantity: 4, unit: '份' },
+    ],
+  },
+  {
+    id: 'pkg-4',
+    name: '零食大礼包',
+    description: '各种零食组合，嗨唱整晚',
+    price: 168,
+    originalPrice: 228,
+    category: 'snack',
+    items: [
+      { name: '爆米花', quantity: 2, unit: '份' },
+      { name: '薯条', quantity: 2, unit: '份' },
+      { name: '鸡米花', quantity: 2, unit: '份' },
+      { name: '水果拼盘', quantity: 1, unit: '份' },
+    ],
+  },
+  {
+    id: 'pkg-5',
+    name: '黄金场欢唱套餐',
+    description: '黄金时段3小时欢唱+酒水套餐',
+    price: 688,
+    originalPrice: 998,
+    category: 'combo',
+    items: [
+      { name: '3小时欢唱', quantity: 1, unit: '次' },
+      { name: '啤酒', quantity: 10, unit: '瓶' },
+      { name: '果盘', quantity: 1, unit: '份' },
+      { name: '小吃', quantity: 3, unit: '份' },
+    ],
+  },
+  {
+    id: 'pkg-6',
+    name: '夜猫子套餐',
+    description: '深夜场6小时欢唱+夜宵',
+    price: 488,
+    originalPrice: 688,
+    category: 'combo',
+    items: [
+      { name: '6小时夜场欢唱', quantity: 1, unit: '次' },
+      { name: '啤酒', quantity: 8, unit: '瓶' },
+      { name: '夜宵套餐', quantity: 1, unit: '份' },
+      { name: '饮料', quantity: 4, unit: '瓶' },
+    ],
+  },
+];
