@@ -42,6 +42,9 @@ export interface Booking {
   extraPrice: number;
   peopleCount: number;
   remarks?: string;
+  cancelReason?: string;
+  cancelTime?: Date;
+  createdAt?: Date;
 }
 
 export type RecurringFrequency = 'weekly' | 'biweekly' | 'monthly';

@@ -31,10 +31,11 @@ interface BookingState {
   getBookingsByDate: (date: Date) => Booking[];
   getBookingsByRoomAndDate: (roomId: string, date: Date) => Booking[];
   hasBookingsForRoom: (roomId: string) => boolean;
+  checkConflict: (roomId: string, startTime: Date, endTime: Date, excludeId?: string) => Booking | null;
   
   addBooking: (booking: Omit<Booking, 'id' | 'totalPrice' | 'extraHours' | 'extraPrice'> & { packageId?: string }) => void;
   updateBooking: (id: string, updates: Partial<Booking>) => void;
-  cancelBooking: (id: string) => void;
+  cancelBooking: (id: string, reason?: string) => void;
   
   extendBooking: (id: string, hours: number) => void;
   addBookings: (bookings: Booking[]) => void;
@@ -145,6 +146,25 @@ export const useBookingStore = create<BookingState>((set, get) => ({
   hasBookingsForRoom: (roomId) =>
     get().bookings.some((b) => b.roomId === roomId),
   
+  checkConflict: (roomId, startTime, endTime, excludeId) => {
+    const activeBookings = get().bookings.filter(
+      (b) =>
+        b.roomId === roomId &&
+        b.status !== 'cancelled' &&
+        b.status !== 'completed' &&
+        (!excludeId || b.id !== excludeId)
+    );
+    
+    for (const b of activeBookings) {
+      const bStart = new Date(b.startTime);
+      const bEnd = new Date(b.endTime);
+      if (startTime < bEnd && endTime > bStart) {
+        return b;
+      }
+    }
+    return null;
+  },
+  
   addBooking: (bookingData) => {
     const room = get().getRoomById(bookingData.roomId);
     const pkg = bookingData.packageId
@@ -185,10 +205,10 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     get().saveToStorage();
   },
   
-  cancelBooking: (id) => {
+  cancelBooking: (id, reason) => {
     set((state) => ({
       bookings: state.bookings.map((b) =>
-        b.id === id ? { ...b, status: 'cancelled' as const } : b
+        b.id === id ? { ...b, status: 'cancelled' as const, cancelTime: new Date(), cancelReason: reason || '手动取消' } : b
       ),
     }));
     get().saveToStorage();

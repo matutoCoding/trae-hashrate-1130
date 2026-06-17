@@ -17,6 +17,8 @@ import {
   Music,
   Eye,
   ChevronRight,
+  AlertTriangle,
+  CheckCircle,
 } from 'lucide-react';
 import {
   getFrequencyLabel,
@@ -24,14 +26,15 @@ import {
   generateBookingsFromRule,
   generateRecurringDates,
 } from '@/utils/recurringUtils';
-import { formatDate, formatMoney } from '@/utils/dateUtils';
+import { formatDate, formatMoney, formatTime, formatDateTime } from '@/utils/dateUtils';
+import { generateId } from '@/utils/dateUtils';
 import { getMemberLevelColor, getMemberLevelLabel } from '@/utils/priceUtils';
 import { RecurringFrequency } from '@/types';
 import { cn } from '@/lib/utils';
 
 export default function Recurring() {
   const { recurringRules, customers, addRecurringRule, updateRecurringRule, deleteRecurringRule, toggleRecurringRule } = useCustomerStore();
-  const { rooms, addBookings, packages } = useBookingStore();
+  const { rooms, addBookings, packages, bookings, checkConflict } = useBookingStore();
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<string | null>(null);
@@ -131,7 +134,7 @@ export default function Recurring() {
     : null;
   
   const previewData = useMemo(() => {
-    if (!selectedRule) return { dates: [], totalPrice: 0, roomPricePerHour: 0, packagePrice: 0 };
+    if (!selectedRule) return { dates: [], totalPrice: 0, roomPricePerHour: 0, packagePrice: 0, conflicts: [] as { date: Date; conflict: any }[], singlePrice: 0, durationHours: 0, availableDates: [] as Date[] };
     
     const room = rooms.find((r) => r.id === selectedRule.roomId);
     const pkg = packages.find((p) => p.id === selectedRule.packageId);
@@ -152,7 +155,26 @@ export default function Recurring() {
     const roomPricePerHour = room?.pricePerHour || 0;
     const packagePrice = pkg?.price || 0;
     const singlePrice = Math.round(durationHours * roomPricePerHour + packagePrice);
-    const totalPrice = singlePrice * dates.length;
+    
+    const conflicts: { date: Date; conflict: any }[] = [];
+    const availableDates: Date[] = [];
+    
+    dates.forEach(date => {
+      const endDate = new Date(date);
+      endDate.setHours(endHours, endMinutes, 0, 0);
+      if (endTotal >= 24 * 60) {
+        endDate.setDate(endDate.getDate() + 1);
+      }
+      
+      const conflict = checkConflict(selectedRule.roomId, date, endDate);
+      if (conflict) {
+        conflicts.push({ date, conflict });
+      } else {
+        availableDates.push(date);
+      }
+    });
+    
+    const totalPrice = singlePrice * availableDates.length;
     
     return {
       dates,
@@ -161,23 +183,48 @@ export default function Recurring() {
       packagePrice,
       singlePrice,
       durationHours,
+      conflicts,
+      availableDates,
     };
-  }, [selectedRule, rooms, packages]);
+  }, [selectedRule, rooms, packages, bookings, checkConflict]);
   
   const confirmGenerate = () => {
-    if (!selectedRuleId) return;
+    if (!selectedRuleId || !selectedRule) return;
     
-    const rule = recurringRules.find((r) => r.id === selectedRuleId);
-    const room = rooms.find((r) => r.id === rule?.roomId);
-    const pkg = packages.find((p) => p.id === rule?.packageId);
+    const room = rooms.find((r) => r.id === selectedRule.roomId);
+    const pkg = packages.find((p) => p.id === selectedRule.packageId);
     
-    if (rule && room) {
-      const newBookings = generateBookingsFromRule(
-        rule,
-        rule.endTime,
-        room.pricePerHour,
-        pkg?.price || 0
-      );
+    if (room && previewData.availableDates.length > 0) {
+      const startHours = parseInt(selectedRule.startTime.split(':')[0]);
+      const startMinutes = parseInt(selectedRule.startTime.split(':')[1]);
+      const endHours = parseInt(selectedRule.endTime.split(':')[0]);
+      const endMinutes = parseInt(selectedRule.endTime.split(':')[1]);
+      let startTotal = startHours * 60 + startMinutes;
+      let endTotal = endHours * 60 + endMinutes;
+      if (endTotal <= startTotal) endTotal += 24 * 60;
+      const durationHours = (endTotal - startTotal) / 60;
+      
+      const newBookings = previewData.availableDates.map(date => {
+        const endDate = new Date(date);
+        endDate.setHours(endHours, endMinutes, 0, 0);
+        if (endTotal >= 24 * 60) endDate.setDate(endDate.getDate() + 1);
+        
+        return {
+          id: generateId(),
+          roomId: selectedRule.roomId,
+          customerId: selectedRule.customerId,
+          recurringRuleId: selectedRule.id,
+          startTime: date,
+          endTime: endDate,
+          status: 'confirmed' as const,
+          packageId: selectedRule.packageId,
+          totalPrice: Math.round(durationHours * room.pricePerHour + (pkg?.price || 0)),
+          isRecurring: true,
+          extraHours: 0,
+          extraPrice: 0,
+          peopleCount: 4,
+        };
+      });
       addBookings(newBookings);
     }
     
@@ -186,7 +233,8 @@ export default function Recurring() {
     setShowPreview(false);
   };
   
-  const generatedCount = previewData.dates.length;
+  const generatedCount = previewData.availableDates.length;
+  const conflictCount = previewData.conflicts.length;
   
   return (
     <div className="space-y-6">
@@ -536,14 +584,22 @@ export default function Recurring() {
                     {formatMoney(previewData.singlePrice || 0)}/次
                   </span>
                 </div>
-                <div className="border-t border-gray-700 pt-2 mt-2">
+                <div className="border-t border-gray-700 pt-2 mt-2 space-y-1">
                   <div className="flex justify-between">
-                    <span className="text-gray-400">生成数量</span>
-                    <span className="text-purple-400 font-medium">
-                      {generatedCount} 条预订
+                    <span className="text-gray-400">可生成</span>
+                    <span className="text-green-400 font-medium">
+                      {generatedCount} 条
                     </span>
                   </div>
-                  <div className="flex justify-between mt-1">
+                  {conflictCount > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">冲突跳过</span>
+                      <span className="text-red-400 font-medium">
+                        {conflictCount} 条
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
                     <span className="text-gray-400">预计总金额</span>
                     <span className="text-green-400 font-bold text-lg">
                       {formatMoney(previewData.totalPrice)}
@@ -551,7 +607,21 @@ export default function Recurring() {
                   </div>
                 </div>
               </div>
-              
+
+              {conflictCount > 0 && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-red-400 font-medium text-sm">
+                      检测到 {conflictCount} 条时间冲突
+                    </p>
+                    <p className="text-red-200/70 text-xs mt-1">
+                      冲突日期将自动跳过，仅生成无冲突的预订
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={() => setShowPreview(!showPreview)}
@@ -560,27 +630,63 @@ export default function Recurring() {
                 <span className="flex items-center gap-2">
                   <Eye className="w-4 h-4" />
                   预览日期列表
+                  {conflictCount > 0 && (
+                    <span className="text-xs text-red-400">({conflictCount}条冲突)</span>
+                  )}
                 </span>
                 <ChevronRight className={cn(
                   'w-4 h-4 transition-transform',
                   showPreview && 'rotate-90'
                 )} />
               </button>
-              
+
               {showPreview && (
                 <div className="max-h-60 overflow-y-auto bg-gray-800/30 rounded-lg p-3 space-y-2">
                   {previewData.dates.length > 0 ? (
-                    previewData.dates.map((date, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between px-3 py-2 bg-gray-800/50 rounded text-sm"
-                      >
-                        <span className="text-gray-400">第 {index + 1} 次</span>
-                        <span className="text-white">
-                          {formatDate(date, 'yyyy-MM-dd EEEE')}
-                        </span>
-                      </div>
-                    ))
+                    previewData.dates.map((date, index) => {
+                      const isConflict = previewData.conflicts.some(c =>
+                        c.date.getTime() === date.getTime()
+                      );
+                      const conflictInfo = previewData.conflicts.find(c =>
+                        c.date.getTime() === date.getTime()
+                      );
+                      const conflictCustomer = conflictInfo
+                        ? customers.find(c => c.id === conflictInfo.conflict.customerId)
+                        : null;
+
+                      return (
+                        <div
+                          key={index}
+                          className={cn(
+                            'flex items-center justify-between px-3 py-2 rounded text-sm',
+                            isConflict
+                              ? 'bg-red-900/30 border border-red-500/30'
+                              : 'bg-gray-800/50'
+                          )}
+                        >
+                          <div className="flex items-center gap-2">
+                            {isConflict ? (
+                              <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+                            ) : (
+                              <CheckCircle className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+                            )}
+                            <span className={isConflict ? 'text-red-300' : 'text-gray-400'}>
+                              第 {index + 1} 次
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className={isConflict ? 'text-red-300' : 'text-white'}>
+                              {formatDate(date, 'yyyy-MM-dd EEEE')}
+                            </span>
+                            {isConflict && conflictCustomer && (
+                              <span className="text-[10px] text-red-400/80">
+                                与 {conflictCustomer.name} 冲突
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
                   ) : (
                     <p className="text-center text-gray-500 py-4">
                       没有可生成的日期，请检查周期规则配置
@@ -588,7 +694,7 @@ export default function Recurring() {
                   )}
                 </div>
               )}
-              
+
               <div className="flex gap-2 pt-2">
                 <Button
                   variant="ghost"
@@ -603,7 +709,7 @@ export default function Recurring() {
                 <Button
                   fullWidth
                   onClick={confirmGenerate}
-                  disabled={previewData.dates.length === 0}
+                  disabled={generatedCount === 0}
                 >
                   确认生成 {generatedCount} 条
                 </Button>

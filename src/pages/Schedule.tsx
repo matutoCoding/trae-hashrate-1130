@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { ScheduleCalendar } from '@/components/schedule/ScheduleCalendar';
 import { BookingForm } from '@/components/booking/BookingForm';
+import { BookingDetailModal } from '@/components/booking/BookingDetailModal';
 import { ExtendHourModal } from '@/components/booking/ExtendHourModal';
 import { StatCard } from '@/components/common/StatCard';
 import { useBookingStore } from '@/stores/useBookingStore';
@@ -17,28 +19,58 @@ export default function Schedule() {
     isExtendModalOpen,
     setIsExtendModalOpen,
     selectedBooking,
+    setSelectedBooking,
     bookings,
     rooms,
+    cancelBooking,
   } = useBookingStore();
-  
-  const todayBookings = bookings.filter(
-    (b) =>
-      new Date(b.startTime).toDateString() === new Date().toDateString()
-  );
-  
+
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+
+  const selectedDate = useBookingStore((s) => s.selectedDate);
+  const todayBookings = bookings.filter((b) => {
+    const d = new Date(b.startTime);
+    const t = selectedDate;
+    return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate();
+  });
+
   const activeRooms = rooms.filter((r) => r.status === 'active');
   const inUseBookings = todayBookings.filter((b) => b.status === 'in_use');
-  
+
   const todayRevenue = todayBookings.reduce(
     (sum, b) => sum + b.totalPrice + b.extraPrice,
     0
   );
-  
+
+  const handleBookingClick = (bookingId: string) => {
+    setDetailBookingId(bookingId);
+    setIsDetailOpen(true);
+  };
+
+  const handleEditFromDetail = () => {
+    setIsDetailOpen(false);
+    setIsBookingModalOpen(true);
+  };
+
+  const handleExtendFromDetail = () => {
+    setIsDetailOpen(false);
+    setIsExtendModalOpen(true);
+  };
+
+  const handleCancelFromDetail = () => {
+    if (selectedBooking) {
+      cancelBooking(selectedBooking.id);
+      setIsDetailOpen(false);
+      setSelectedBooking(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-4 gap-4">
         <StatCard
-          title="今日预订"
+          title="当日预订"
           value={todayBookings.length}
           subtitle="单"
           icon={<CalendarCheck className="w-5 h-5" />}
@@ -53,7 +85,7 @@ export default function Schedule() {
           color="green"
         />
         <StatCard
-          title="今日营收"
+          title="当日营收"
           value={`¥${todayRevenue.toLocaleString()}`}
           subtitle="元"
           icon={<DollarSign className="w-5 h-5" />}
@@ -68,7 +100,7 @@ export default function Schedule() {
           color="blue"
         />
       </div>
-      
+
       <ScheduleCalendar
         onAddBooking={(roomId, time) => {
           if (time) {
@@ -77,8 +109,9 @@ export default function Schedule() {
             setIsBookingModalOpen(true);
           }
         }}
+        onEditBooking={handleBookingClick}
       />
-      
+
       <BookingForm
         isOpen={isBookingModalOpen}
         onClose={() => {
@@ -86,7 +119,22 @@ export default function Schedule() {
           useBookingStore.getState().setSelectedBooking(null);
         }}
       />
-      
+
+      {detailBookingId && (
+        <BookingDetailModal
+          isOpen={isDetailOpen}
+          onClose={() => {
+            setIsDetailOpen(false);
+            setDetailBookingId(null);
+            setSelectedBooking(null);
+          }}
+          bookingId={detailBookingId}
+          onEdit={handleEditFromDetail}
+          onExtend={handleExtendFromDetail}
+          onCancel={handleCancelFromDetail}
+        />
+      )}
+
       {selectedBooking && (
         <ExtendHourModal
           isOpen={isExtendModalOpen}
