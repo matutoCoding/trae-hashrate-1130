@@ -5,6 +5,7 @@ import { mockBookings } from '../data/bookings';
 import { mockPackages } from '../data/packages';
 import { generateId } from '../utils/dateUtils';
 import { calculateBookingPrice, calculateExtraPrice } from '../utils/priceUtils';
+import { useCustomerStore } from './useCustomerStore';
 
 const STORAGE_KEY = 'ktv-booking-store';
 
@@ -39,6 +40,10 @@ interface BookingState {
   
   extendBooking: (id: string, hours: number) => void;
   addBookings: (bookings: Booking[]) => void;
+  
+  confirmArrival: (id: string) => void;
+  checkIn: (id: string) => void;
+  completeBooking: (id: string) => void;
   
   addRoom: (room: Omit<Room, 'id'>) => void;
   updateRoom: (id: string, updates: Partial<Room>) => void;
@@ -244,6 +249,50 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     set((state) => ({
       bookings: [...state.bookings, ...newBookings],
     }));
+    get().saveToStorage();
+  },
+  
+  confirmArrival: (id) => {
+    set((state) => ({
+      bookings: state.bookings.map((b) =>
+        b.id === id ? { ...b, status: 'arrived' as const } : b
+      ),
+    }));
+    get().saveToStorage();
+  },
+  
+  checkIn: (id) => {
+    set((state) => ({
+      bookings: state.bookings.map((b) =>
+        b.id === id ? { ...b, status: 'in_use' as const } : b
+      ),
+    }));
+    get().saveToStorage();
+  },
+  
+  completeBooking: (id) => {
+    const booking = get().bookings.find((b) => b.id === id);
+    const customerId = booking?.customerId;
+    
+    set((state) => ({
+      bookings: state.bookings.map((b) =>
+        b.id === id ? { ...b, status: 'completed' as const } : b
+      ),
+    }));
+    
+    if (customerId) {
+      const { updateCustomer, getCustomerById } = useCustomerStore.getState();
+      const customer = getCustomerById(customerId);
+      const total = (booking?.totalPrice || 0) + (booking?.extraPrice || 0);
+      if (customer) {
+        updateCustomer(customerId, {
+          totalSpent: customer.totalSpent + total,
+          visitCount: customer.visitCount + 1,
+          points: customer.points + Math.floor(total / 10),
+        });
+      }
+    }
+    
     get().saveToStorage();
   },
   

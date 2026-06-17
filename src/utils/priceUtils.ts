@@ -38,6 +38,7 @@ export const getBookingStatusLabel = (status: string): string => {
   const labels: Record<string, string> = {
     pending: '待确认',
     confirmed: '已确认',
+    arrived: '已到店',
     in_use: '使用中',
     completed: '已完成',
     cancelled: '已取消',
@@ -50,6 +51,7 @@ export const getBookingStatusColor = (status: string): string => {
   const colors: Record<string, string> = {
     pending: 'bg-amber-500',
     confirmed: 'bg-blue-500',
+    arrived: 'bg-cyan-500',
     in_use: 'bg-green-500',
     completed: 'bg-gray-500',
     cancelled: 'bg-red-500',

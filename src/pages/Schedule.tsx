@@ -22,11 +22,9 @@ export default function Schedule() {
     setSelectedBooking,
     bookings,
     rooms,
-    cancelBooking,
   } = useBookingStore();
 
   const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
 
   const selectedDate = useBookingStore((s) => s.selectedDate);
   const todayBookings = bookings.filter((b) => {
@@ -43,9 +41,12 @@ export default function Schedule() {
     0
   );
 
-  const handleBookingClick = (bookingId: string) => {
-    setDetailBookingId(bookingId);
-    setIsDetailOpen(true);
+  const handleEditClick = (bookingId: string) => {
+    const target = bookings.find((b) => b.id === bookingId);
+    if (target) {
+      setSelectedBooking(target);
+      setIsDetailOpen(true);
+    }
   };
 
   const handleEditFromDetail = () => {
@@ -56,14 +57,6 @@ export default function Schedule() {
   const handleExtendFromDetail = () => {
     setIsDetailOpen(false);
     setIsExtendModalOpen(true);
-  };
-
-  const handleCancelFromDetail = () => {
-    if (selectedBooking) {
-      cancelBooking(selectedBooking.id);
-      setIsDetailOpen(false);
-      setSelectedBooking(null);
-    }
   };
 
   return (
@@ -109,29 +102,26 @@ export default function Schedule() {
             setIsBookingModalOpen(true);
           }
         }}
-        onEditBooking={handleBookingClick}
+        onEditBooking={handleEditClick}
       />
 
       <BookingForm
         isOpen={isBookingModalOpen}
         onClose={() => {
           setIsBookingModalOpen(false);
-          useBookingStore.getState().setSelectedBooking(null);
+          setSelectedBooking(null);
         }}
       />
 
-      {detailBookingId && (
+      {selectedBooking && (
         <BookingDetailModal
           isOpen={isDetailOpen}
           onClose={() => {
             setIsDetailOpen(false);
-            setDetailBookingId(null);
-            setSelectedBooking(null);
           }}
-          bookingId={detailBookingId}
+          bookingId={selectedBooking.id}
           onEdit={handleEditFromDetail}
           onExtend={handleExtendFromDetail}
-          onCancel={handleCancelFromDetail}
         />
       )}
 

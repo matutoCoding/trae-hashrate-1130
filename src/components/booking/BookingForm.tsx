@@ -273,6 +273,7 @@ export function BookingForm({ isOpen, onClose, booking, defaultRoomId, defaultSt
             >
               <option value="pending">待确认</option>
               <option value="confirmed">已确认</option>
+              <option value="arrived">已到店</option>
               <option value="in_use">使用中</option>
               <option value="completed">已完成</option>
             </select>

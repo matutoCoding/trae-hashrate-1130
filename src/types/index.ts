@@ -25,7 +25,7 @@ export interface Customer {
   visitCount: number;
 }
 
-export type BookingStatus = 'pending' | 'confirmed' | 'in_use' | 'completed' | 'cancelled' | 'extended';
+export type BookingStatus = 'pending' | 'confirmed' | 'arrived' | 'in_use' | 'completed' | 'cancelled' | 'extended';
 
 export interface Booking {
   id: string;
