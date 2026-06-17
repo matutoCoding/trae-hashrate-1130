@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Room, Booking, Package, ViewMode } from '../types';
+import { Room, Booking, Package, ViewMode, PaymentMethod, SettlementRecord } from '../types';
 import { mockRooms } from '../data/rooms';
 import { mockBookings } from '../data/bookings';
 import { mockPackages } from '../data/packages';
@@ -43,7 +43,13 @@ interface BookingState {
   
   confirmArrival: (id: string) => void;
   checkIn: (id: string) => void;
-  completeBooking: (id: string) => void;
+  completeBooking: (id: string, params: {
+    paymentMethod: PaymentMethod;
+    discount: number;
+    rounding: number;
+    pointsUsed?: number;
+    notes?: string;
+  }) => void;
   
   addRoom: (room: Omit<Room, 'id'>) => void;
   updateRoom: (id: string, updates: Partial<Room>) => void;
@@ -68,6 +74,11 @@ const loadInitialState = () => {
           ...b,
           startTime: new Date(b.startTime),
           endTime: new Date(b.endTime),
+          cancelTime: b.cancelTime ? new Date(b.cancelTime) : undefined,
+          settlement: b.settlement ? {
+            ...b.settlement,
+            settledAt: new Date(b.settlement.settledAt),
+          } : undefined,
         })) || mockBookings,
         packages: data.packages?.map((p: any) => ({ ...p })) || mockPackages,
         selectedDate: data.selectedDate ? new Date(data.selectedDate) : new Date(),
@@ -270,25 +281,52 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     get().saveToStorage();
   },
   
-  completeBooking: (id) => {
+  completeBooking: (id, params) => {
     const booking = get().bookings.find((b) => b.id === id);
-    const customerId = booking?.customerId;
+    if (!booking) return;
+    
+    const customerId = booking.customerId;
+    const roomFee = booking.totalPrice;
+    const packageFee = booking.packageId ? (get().getPackageById(booking.packageId)?.price || 0) : 0;
+    const extraFee = booking.extraPrice;
+    
+    const subtotal = roomFee + extraFee;
+    const { discount = 0, rounding = 0, pointsUsed = 0 } = params;
+    const totalAmount = subtotal - discount - rounding - pointsUsed;
+    
+    const pointsEarned = Math.floor(Math.max(totalAmount, 0) / 10);
+    
+    const settlement: SettlementRecord = {
+      id: generateId(),
+      bookingId: id,
+      roomFee,
+      packageFee,
+      extraFee,
+      subtotal,
+      discount,
+      rounding,
+      totalAmount: Math.max(totalAmount, 0),
+      paymentMethod: params.paymentMethod,
+      pointsEarned,
+      pointsUsed,
+      settledAt: new Date(),
+      notes: params.notes,
+    };
     
     set((state) => ({
       bookings: state.bookings.map((b) =>
-        b.id === id ? { ...b, status: 'completed' as const } : b
+        b.id === id ? { ...b, status: 'completed' as const, settlement } : b
       ),
     }));
     
     if (customerId) {
       const { updateCustomer, getCustomerById } = useCustomerStore.getState();
       const customer = getCustomerById(customerId);
-      const total = (booking?.totalPrice || 0) + (booking?.extraPrice || 0);
       if (customer) {
         updateCustomer(customerId, {
-          totalSpent: customer.totalSpent + total,
+          totalSpent: customer.totalSpent + Math.max(totalAmount, 0),
           visitCount: customer.visitCount + 1,
-          points: customer.points + Math.floor(total / 10),
+          points: customer.points + pointsEarned - pointsUsed,
         });
       }
     }
@@ -370,6 +408,11 @@ export const useBookingStore = create<BookingState>((set, get) => ({
           ...b,
           startTime: b.startTime.toISOString(),
           endTime: b.endTime.toISOString(),
+          cancelTime: b.cancelTime?.toISOString(),
+          settlement: b.settlement ? {
+            ...b.settlement,
+            settledAt: b.settlement.settledAt.toISOString(),
+          } : undefined,
         })),
         packages: state.packages,
         selectedDate: state.selectedDate.toISOString(),

@@ -27,6 +27,26 @@ export interface Customer {
 
 export type BookingStatus = 'pending' | 'confirmed' | 'arrived' | 'in_use' | 'completed' | 'cancelled' | 'extended';
 
+export type PaymentMethod = 'cash' | 'wechat' | 'alipay' | 'card' | 'points' | 'credit';
+
+export interface SettlementRecord {
+  id: string;
+  bookingId: string;
+  roomFee: number;
+  packageFee: number;
+  extraFee: number;
+  subtotal: number;
+  discount: number;
+  rounding: number;
+  totalAmount: number;
+  paymentMethod: PaymentMethod;
+  pointsEarned: number;
+  pointsUsed: number;
+  settledAt: Date;
+  settledBy?: string;
+  notes?: string;
+}
+
 export interface Booking {
   id: string;
   roomId: string;
@@ -44,7 +64,16 @@ export interface Booking {
   remarks?: string;
   cancelReason?: string;
   cancelTime?: Date;
+  settlement?: SettlementRecord;
   createdAt?: Date;
+}
+
+export interface BusinessHours {
+  dayStartHour: number;
+  dayStartMinute: number;
+  dayEndHour: number;
+  dayEndMinute: number;
+  overnight: boolean;
 }
 
 export type RecurringFrequency = 'weekly' | 'biweekly' | 'monthly';

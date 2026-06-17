@@ -2,51 +2,44 @@ import { useMemo, useState } from 'react';
 import { useBookingStore } from '@/stores/useBookingStore';
 import { useCustomerStore } from '@/stores/useCustomerStore';
 import { formatDate, formatTime } from '@/utils/dateUtils';
+import {
+  getDisplayHours,
+  getDisplayHourLabels,
+  getBusinessDayStart,
+  getBusinessDayEnd,
+  getBookingSegmentForBusinessDay,
+  getTimePositionPercent,
+  getDateTimeForAbsoluteHour,
+  getWeekBusinessDays,
+  isMidnightHour,
+  navigateBusinessDay,
+} from '@/utils/businessHours';
 import { ChevronLeft, ChevronRight, Plus, Filter, X } from 'lucide-react';
 import { Button } from '../common/Button';
-import {
-  startOfDay,
-  addDays,
-  eachDayOfInterval,
-  startOfWeek,
-  endOfWeek,
-  setHours,
-  setMinutes,
-  differenceInMinutes,
-  isBefore,
-  isAfter,
-  isSameDay,
-} from 'date-fns';
+import { startOfDay, isBefore, isAfter, isSameDay, differenceInMinutes } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { Booking, RoomType, BookingStatus, MemberLevel } from '@/types';
 import {
   getRoomTypeLabel,
   getBookingStatusLabel,
   getMemberLevelLabel,
+  getBookingStatusColor,
 } from '@/utils/priceUtils';
 
 interface ScheduleFilter {
   roomType?: RoomType | 'all';
   bookingStatus?: BookingStatus | 'all';
   memberLevel?: MemberLevel | 'all';
+  showCancelled?: boolean;
 }
 
 interface ScheduleCalendarProps {
   onAddBooking?: (roomId?: string, time?: Date) => void;
   onEditBooking?: (bookingId: string) => void;
-  onRefresh?: () => void;
 }
 
-const HOUR_START = 10;
-const HOUR_END = 27;
-const HOURS = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => {
-  const h = (HOUR_START + i) % 24;
-  return h;
-});
-const HOUR_LABELS = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => {
-  const h = (HOUR_START + i) % 24;
-  return `${h}:00`;
-});
+const ROW_HEIGHT = 140;
+const HOUR_WIDTH = 60;
 
 function isOvernightBooking(b: Booking): boolean {
   const s = new Date(b.startTime);
@@ -54,28 +47,13 @@ function isOvernightBooking(b: Booking): boolean {
   return !isSameDay(s, e);
 }
 
-function bookingOverlapsDay(b: Booking, day: Date): boolean {
+function bookingOverlapsBusinessDay(b: Booking, businessDay: Date): boolean {
   const s = new Date(b.startTime);
   const e = new Date(b.endTime);
-  const dayStart = startOfDay(day);
-  const dayEnd = startOfDay(addDays(day, 1));
+  const dayStart = getBusinessDayStart(businessDay);
+  const dayEnd = getBusinessDayEnd(businessDay);
   return s < dayEnd && e > dayStart;
 }
-
-function getBookingSegmentForDay(b: Booking, day: Date): { start: Date; end: Date } | null {
-  if (!bookingOverlapsDay(b, day)) return null;
-  const s = new Date(b.startTime);
-  const e = new Date(b.endTime);
-  const dayStart = startOfDay(day);
-  const dayEnd = startOfDay(addDays(day, 1));
-  return {
-    start: s > dayStart ? s : dayStart,
-    end: e < dayEnd ? e : dayEnd,
-  };
-}
-
-const ROW_HEIGHT = 140;
-const HOUR_WIDTH = 60;
 
 export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalendarProps) {
   const { rooms, selectedDate, viewMode, setSelectedDate, setViewMode, setIsBookingModalOpen, setSelectedBooking, bookings } = useBookingStore();
@@ -85,18 +63,22 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
     roomType: 'all',
     bookingStatus: 'all',
     memberLevel: 'all',
+    showCancelled: false,
   });
   const [showFilterBar, setShowFilterBar] = useState(true);
 
+  const businessDay = useMemo(() => startOfDay(selectedDate), [selectedDate]);
+
+  const HOURS = getDisplayHours();
+  const HOUR_LABELS = getDisplayHourLabels();
+  const TOTAL_HOURS = HOURS.length;
+
   const days = useMemo(() => {
     if (viewMode === 'day') {
-      return [selectedDate];
+      return [businessDay];
     }
-    return eachDayOfInterval({
-      start: startOfWeek(selectedDate, { weekStartsOn: 1 }),
-      end: endOfWeek(selectedDate, { weekStartsOn: 1 }),
-    });
-  }, [selectedDate, viewMode]);
+    return getWeekBusinessDays(selectedDate);
+  }, [selectedDate, viewMode, businessDay]);
 
   const filteredRooms = useMemo(() => {
     let list = rooms.filter((r) => r.status === 'active');
@@ -109,8 +91,8 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
   const getBookingsForRoomAndDay = (roomId: string, day: Date): Booking[] => {
     return bookings.filter((b) => {
       if (b.roomId !== roomId) return false;
-      if (b.status === 'cancelled') return false;
-      if (!bookingOverlapsDay(b, day)) return false;
+      if (!filter.showCancelled && b.status === 'cancelled') return false;
+      if (!bookingOverlapsBusinessDay(b, day)) return false;
       if (filter.bookingStatus && filter.bookingStatus !== 'all') {
         if (b.status !== filter.bookingStatus) return false;
       }
@@ -123,37 +105,17 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
   };
 
   const navigatePrev = () => {
-    setSelectedDate(addDays(selectedDate, viewMode === 'day' ? -1 : -7));
+    const next = navigateBusinessDay(businessDay, -1, viewMode === 'month' ? 'day' : viewMode);
+    setSelectedDate(next);
   };
 
   const navigateNext = () => {
-    setSelectedDate(addDays(selectedDate, viewMode === 'day' ? 1 : 7));
-  };
-
-  const getTimePosStyle = (segmentStart: Date, segmentEnd: Date, day: Date) => {
-    const dayStart = setMinutes(setHours(startOfDay(day), HOUR_START), 0);
-    const dayEnd = setMinutes(setHours(startOfDay(addDays(day, 1)), 3), 0);
-
-    const effStart = segmentStart > dayStart ? segmentStart : dayStart;
-    const effEnd = segmentEnd < dayEnd ? segmentEnd : dayEnd;
-
-    const totalMinutes = (HOUR_END - HOUR_START) * 60;
-    const startOffset = differenceInMinutes(effStart, dayStart);
-    const duration = differenceInMinutes(effEnd, effStart);
-
-    const left = (startOffset / totalMinutes) * 100;
-    const width = (duration / totalMinutes) * 100;
-
-    return {
-      left: `${Math.max(left, 0)}%`,
-      width: `${Math.max(width, 2)}%`,
-    };
+    const next = navigateBusinessDay(businessDay, 1, viewMode === 'month' ? 'day' : viewMode);
+    setSelectedDate(next);
   };
 
   const handleSlotClick = (roomId: string, day: Date, absoluteHour: number) => {
-    const realHour = absoluteHour % 24;
-    const targetDay = absoluteHour >= 24 ? addDays(day, 1) : day;
-    const time = setMinutes(setHours(targetDay, realHour), 0);
+    const time = getDateTimeForAbsoluteHour(day, absoluteHour);
     if (onAddBooking) {
       onAddBooking(roomId, time);
     } else {
@@ -164,14 +126,19 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
 
   const handleAddBooking = () => {
     setSelectedBooking(null);
-    setIsBookingModalOpen(true, selectedDate);
+    const baseDate = selectedDate;
+    if (filteredRooms.length === 1) {
+      setIsBookingModalOpen(true, baseDate);
+    } else {
+      setIsBookingModalOpen(true, baseDate);
+    }
   };
 
   const resetFilter = () => {
-    setFilter({ roomType: 'all', bookingStatus: 'all', memberLevel: 'all' });
+    setFilter({ roomType: 'all', bookingStatus: 'all', memberLevel: 'all', showCancelled: false });
   };
 
-  const hasActiveFilter = filter.roomType !== 'all' || filter.bookingStatus !== 'all' || filter.memberLevel !== 'all';
+  const hasActiveFilter = filter.roomType !== 'all' || filter.bookingStatus !== 'all' || filter.memberLevel !== 'all' || filter.showCancelled;
 
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
@@ -187,6 +154,9 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
                   ? formatDate(selectedDate, 'yyyy年MM月dd日 EEEE')
                   : `${formatDate(days[0], 'MM月dd日')} - ${formatDate(days[days.length - 1], 'MM月dd日')}`}
               </h3>
+              <p className="text-[10px] text-gray-500 -mt-1">
+                营业日 10:00 - 次日03:00
+              </p>
             </div>
             <Button variant="ghost" size="sm" onClick={navigateNext}>
               <ChevronRight className="w-4 h-4" />
@@ -217,6 +187,11 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
             <Button onClick={handleAddBooking}>
               <Plus className="w-4 h-4" />
               新增预订
+              {filteredRooms.length === 1 && (
+                <span className="ml-1 text-xs opacity-70">
+                  ({filteredRooms[0].name})
+                </span>
+              )}
             </Button>
           </div>
         </div>
@@ -241,7 +216,7 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
               className="h-8 px-2 bg-gray-900 border border-gray-700 rounded text-xs text-white focus:outline-none focus:border-purple-500"
             >
               <option value="all">全部预订状态</option>
-              {(['pending', 'confirmed', 'in_use', 'extended', 'completed'] as BookingStatus[]).map((s) => (
+              {(['pending', 'confirmed', 'arrived', 'in_use', 'extended', 'completed'] as BookingStatus[]).map((s) => (
                 <option key={s} value={s}>{getBookingStatusLabel(s)}</option>
               ))}
             </select>
@@ -256,6 +231,16 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
                 <option key={l} value={l}>{getMemberLevelLabel(l)}</option>
               ))}
             </select>
+
+            <label className="flex items-center gap-1 text-xs text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={filter.showCancelled}
+                onChange={(e) => setFilter({ ...filter, showCancelled: e.target.checked })}
+                className="w-3.5 h-3.5 rounded border-gray-600 text-purple-500 focus:ring-purple-500"
+              />
+              显示已取消
+            </label>
 
             {hasActiveFilter && (
               <Button size="sm" variant="ghost" onClick={resetFilter}>
@@ -272,7 +257,7 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
       </div>
 
       <div className="overflow-auto max-h-[calc(100vh-340px)]">
-        <div style={{ minWidth: `${(HOUR_END - HOUR_START) * HOUR_WIDTH + 128}px` }}>
+        <div style={{ minWidth: `${TOTAL_HOURS * HOUR_WIDTH + 128}px` }}>
           <div className="sticky top-0 z-10 bg-gray-900 border-b border-gray-800">
             <div className="flex">
               <div className="w-32 flex-shrink-0 p-3 border-r border-gray-800">
@@ -281,18 +266,18 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
               <div className="flex-1 flex">
                 {HOUR_LABELS.map((label, i) => {
                   const hour = HOURS[i];
-                  const isMidnight = hour >= 0 && hour < 6;
+                  const midnight = isMidnightHour(hour);
                   return (
                     <div
                       key={i}
                       className={cn(
                         'flex-1 p-2 text-center border-r border-gray-800 last:border-r-0',
-                        isMidnight && 'bg-indigo-950/30'
+                        midnight && 'bg-indigo-950/30'
                       )}
                     >
                       <span className={cn(
                         'text-xs',
-                        isMidnight ? 'text-indigo-400' : 'text-gray-500'
+                        midnight ? 'text-indigo-400' : 'text-gray-500'
                       )}>
                         {label}
                       </span>
@@ -318,16 +303,16 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
                     style={{ height: `${ROW_HEIGHT}px` }}
                   >
                     <div className="absolute inset-0 flex">
-                      {HOURS.map((hour, i) => {
-                        const isMidnight = hour >= 0 && hour < 6;
+                      {HOURS.map((_, i) => {
+                        const midnight = isMidnightHour(HOURS[i]);
                         return (
                           <div
                             key={i}
                             className={cn(
                               'flex-1 border-r border-gray-800/50 hover:bg-gray-800/30 cursor-pointer transition-colors',
-                              isMidnight && 'bg-indigo-950/20'
+                              midnight && 'bg-indigo-950/20'
                             )}
-                            onClick={() => handleSlotClick(room.id, displayDay, HOUR_START + i)}
+                            onClick={() => handleSlotClick(room.id, displayDay, i)}
                           />
                         );
                       })}
@@ -335,20 +320,27 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
 
                     <div className="absolute inset-0" style={{ padding: '4px 0' }}>
                       {getBookingsForRoomAndDay(room.id, displayDay).map((booking) => {
-                        const segment = getBookingSegmentForDay(booking, displayDay);
+                        const segment = getBookingSegmentForBusinessDay(
+                          new Date(booking.startTime),
+                          new Date(booking.endTime),
+                          displayDay
+                        );
                         if (!segment) return null;
 
-                        const style = getTimePosStyle(segment.start, segment.end, displayDay);
+                        const pos = getTimePositionPercent(segment.start, segment.end, displayDay);
                         const overnight = isOvernightBooking(booking);
-                        const continuesFromPrev = isBefore(new Date(booking.startTime), startOfDay(displayDay));
-                        const continuesToNext = isAfter(new Date(booking.endTime), startOfDay(addDays(displayDay, 1)));
+                        const continuesFromPrev = isBefore(new Date(booking.startTime), getBusinessDayStart(displayDay));
+                        const continuesToNext = isAfter(new Date(booking.endTime), getBusinessDayEnd(displayDay));
                         const customer = customers.find((c) => c.id === booking.customerId);
 
                         return (
                           <div
                             key={`${booking.id}-${formatDate(displayDay)}`}
                             className="absolute top-1 bottom-1 cursor-pointer group"
-                            style={style}
+                            style={{
+                              left: `${pos.left}%`,
+                              width: `${pos.width}%`,
+                            }}
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedBooking(booking);
@@ -362,13 +354,21 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
                             <div className={cn(
                               'h-full rounded-md px-2 py-1 overflow-hidden text-xs border-l-[3px] transition-all',
                               'hover:shadow-lg hover:brightness-110',
-                              booking.status === 'in_use' ? 'bg-green-900/60 border-green-400' :
-                              booking.status === 'arrived' ? 'bg-cyan-900/60 border-cyan-400' :
-                              booking.status === 'confirmed' ? 'bg-blue-900/60 border-blue-400' :
-                              booking.status === 'pending' ? 'bg-amber-900/60 border-amber-400' :
-                              booking.status === 'extended' ? 'bg-purple-900/60 border-purple-400' :
-                              booking.status === 'completed' ? 'bg-gray-700/60 border-gray-400' :
-                              'bg-gray-700/60 border-gray-400'
+                              booking.status === 'cancelled'
+                                ? 'bg-gray-700/40 border-gray-500 line-through opacity-60'
+                                : booking.status === 'in_use'
+                                  ? 'bg-green-900/60 border-green-400'
+                                  : booking.status === 'arrived'
+                                    ? 'bg-cyan-900/60 border-cyan-400'
+                                    : booking.status === 'confirmed'
+                                      ? 'bg-blue-900/60 border-blue-400'
+                                      : booking.status === 'pending'
+                                        ? 'bg-amber-900/60 border-amber-400'
+                                        : booking.status === 'extended'
+                                          ? 'bg-purple-900/60 border-purple-400'
+                                          : booking.status === 'completed'
+                                            ? 'bg-gray-700/60 border-gray-400'
+                                            : 'bg-gray-700/60 border-gray-400'
                             )}>
                               <div className="flex items-center justify-between gap-1">
                                 <span className="font-medium text-white truncate">
@@ -383,10 +383,13 @@ export function ScheduleCalendar({ onAddBooking, onEditBooking }: ScheduleCalend
                               <div className="text-gray-300 truncate">
                                 {formatTime(segment.start)}-{formatTime(segment.end)}
                               </div>
-                              {continuesFromPrev && (
+                              {booking.status === 'cancelled' && (
+                                <div className="text-gray-400 text-[10px]">已取消</div>
+                              )}
+                              {continuesFromPrev && booking.status !== 'cancelled' && (
                                 <div className="text-indigo-300 text-[10px]">← 接前日</div>
                               )}
-                              {continuesToNext && (
+                              {continuesToNext && booking.status !== 'cancelled' && (
                                 <div className="text-indigo-300 text-[10px]">续次日 →</div>
                               )}
                             </div>
